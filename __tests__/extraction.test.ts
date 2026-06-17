@@ -58,6 +58,12 @@ describe('Language Detection', () => {
     expect(detectLanguage('Main.java')).toBe('java');
   });
 
+  it('should detect Groovy files', () => {
+    expect(detectLanguage('UserService.groovy')).toBe('groovy');
+    expect(detectLanguage('script.gvy')).toBe('groovy');
+    expect(detectLanguage('BuildConfig.gy')).toBe('groovy');
+  });
+
   it('should detect C files', () => {
     expect(detectLanguage('main.c')).toBe('c');
     expect(detectLanguage('utils.h')).toBe('c');
@@ -6236,6 +6242,92 @@ class Svc {
     // The decorated symbol must be `method`, not the constructor or class.
     const decoratedNode = result.nodes.find((n) => n.id === decorMethod!.fromNodeId);
     expect(decoratedNode?.name).toBe('method');
+  });
+});
+
+// =============================================================================
+// Groovy
+// =============================================================================
+
+describe('Groovy Extraction', () => {
+  describe('Language detection', () => {
+    it('should detect Groovy files', () => {
+      expect(detectLanguage('UserService.groovy')).toBe('groovy');
+      expect(detectLanguage('grails-app/controllers/BookController.groovy')).toBe('groovy');
+    });
+
+    it('should report Groovy as supported', () => {
+      expect(isLanguageSupported('groovy')).toBe(true);
+      expect(getSupportedLanguages()).toContain('groovy');
+    });
+  });
+
+  describe('Class and method extraction', () => {
+    it('should extract class declarations and methods', () => {
+      const code = `
+package com.example
+
+class UserService {
+    def userRepository;
+
+    def findUser(Long id) {
+        return userRepository.findById(id)
+    }
+
+    static def greet(String name) {
+        return "Hello, \${name}"
+    }
+}
+`;
+      const result = extractFromSource('UserService.groovy', code);
+
+      const cls = result.nodes.find((n) => n.kind === 'class' && n.name === 'UserService');
+      expect(cls).toBeDefined();
+      expect(cls?.language).toBe('groovy');
+
+      const ns = result.nodes.find((n) => n.kind === 'namespace');
+      expect(ns?.name).toBe('com.example');
+
+      const methods = result.nodes.filter((n) => n.kind === 'method');
+      expect(methods.find((m) => m.name === 'findUser')).toBeDefined();
+      expect(methods.find((m) => m.name === 'greet')?.isStatic).toBe(true);
+    });
+
+    it('should extract interfaces and enums', () => {
+      const code = `
+interface UserRepository {
+    def findById(Long id)
+}
+
+enum Status {
+    ACTIVE, INACTIVE
+}
+`;
+      const result = extractFromSource('Types.groovy', code);
+      expect(result.nodes.find((n) => n.kind === 'interface' && n.name === 'UserRepository')).toBeDefined();
+      expect(result.nodes.find((n) => n.kind === 'enum' && n.name === 'Status')).toBeDefined();
+      expect(result.nodes.filter((n) => n.kind === 'enum_member').length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('should extract traits', () => {
+      const code = `
+trait Auditable {
+    Date dateCreated
+}
+`;
+      const result = extractFromSource('Auditable.groovy', code);
+      expect(result.nodes.find((n) => n.kind === 'trait' && n.name === 'Auditable')).toBeDefined();
+    });
+
+    it('should extract imports', () => {
+      const code = `
+import grails.gorm.transactions.Transactional
+import org.springframework.stereotype.Service
+`;
+      const result = extractFromSource('imports.groovy', code);
+      const imports = result.nodes.filter((n) => n.kind === 'import');
+      expect(imports.length).toBeGreaterThanOrEqual(2);
+    });
   });
 });
 

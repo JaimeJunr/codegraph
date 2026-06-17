@@ -834,6 +834,26 @@ describe('railsResolver.extract', () => {
   });
 });
 
+import { grailsResolver } from '../src/resolution/frameworks/grails';
+
+describe('grailsResolver', () => {
+  it('detects Grails projects from build.gradle', () => {
+    const context = {
+      readFile: (p: string) => (p === 'build.gradle' ? "apply plugin: 'org.grails.grails-web'" : null),
+      fileExists: () => false,
+      getAllFiles: () => [],
+    };
+    expect(grailsResolver.detect(context as any)).toBe(true);
+  });
+
+  it('extracts inline URL mappings', () => {
+    const src = `"/books"(controller: "book", action: "index")\n`;
+    const { nodes, references } = grailsResolver.extract!('grails-app/conf/UrlMappings.groovy', src);
+    expect(nodes[0].name).toBe('GET /books');
+    expect(references[0].referenceName).toBe('book#index');
+  });
+});
+
 import { springResolver } from '../src/resolution/frameworks/java';
 
 describe('springResolver.extract', () => {
@@ -860,6 +880,19 @@ fun showVetList(model: MutableMap<String, Any>): String {
     expect(nodes[0].name).toBe('GET /vets');
     expect(references[0].referenceName).toBe('showVetList');
     expect(nodes[0].language).toBe('kotlin');
+  });
+
+  it('extracts a Groovy @GetMapping with a def handler', () => {
+    const src = `
+@GetMapping("/books")
+def listBooks() {
+  return []
+}
+`;
+    const { nodes, references } = springResolver.extract!('BookController.groovy', src);
+    expect(nodes[0].name).toBe('GET /books');
+    expect(references[0].referenceName).toBe('listBooks');
+    expect(nodes[0].language).toBe('groovy');
   });
 
   it('joins a Kotlin class @RequestMapping prefix and skips a stacked annotation', () => {
