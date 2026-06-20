@@ -1,0 +1,5 @@
+[tools]
+# node:sqlite requires the FTS5 extension (src/db/sqlite-adapter.ts). The system
+# node 22.14 is built WITHOUT FTS5 — DB-backed tests/CLI fail with
+# "no such module: fts5". 22.22.2 is an official build that includes FTS5.
+node = "22.22.2"
