@@ -3868,6 +3868,22 @@ export class TreeSitterExtractor {
       return;
     }
 
+    // Groovy (murtaza grammar): the supertype is the `superclass` FIELD, whose
+    // node is a bare identifier — the generic clause-type scan below never matches
+    // it. (`implements` is unsupported by the grammar; it lands in an ERROR node.)
+    if (this.language === 'groovy') {
+      const sup = getChildByField(node, 'superclass');
+      if (sup) {
+        this.unresolvedReferences.push({
+          fromNodeId: classId,
+          referenceName: getNodeText(sup, this.source),
+          referenceKind: 'extends',
+          line: sup.startPosition.row + 1,
+          column: sup.startPosition.column,
+        });
+      }
+    }
+
     // Look for extends/implements clauses
     for (let i = 0; i < node.namedChildCount; i++) {
       const child = node.namedChild(i);

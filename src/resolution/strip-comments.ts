@@ -30,6 +30,7 @@ export type CommentLang =
   | 'php'
   | 'ruby'
   | 'java'
+  | 'groovy'
   | 'csharp'
   | 'swift'
   | 'go'
@@ -50,6 +51,7 @@ export function stripCommentsForRegex(content: string, lang: CommentLang): strin
     case 'javascript':
     case 'typescript':
     case 'java':
+    case 'groovy':
     case 'csharp':
     case 'swift':
       return stripCStyle(content, /* allowSingleQuoteStrings */ lang === 'javascript' || lang === 'typescript');

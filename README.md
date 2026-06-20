@@ -238,7 +238,7 @@ CodeGraph cuts **tokens, tool calls, and wall-clock time on every repo** — acr
 | **Full-Text Search** | Find code by name instantly across your entire codebase, powered by FTS5 |
 | **Impact Analysis** | Trace callers, callees, and the full impact radius of any symbol before making changes |
 | **Always Fresh** | File watcher uses native OS events (FSEvents/inotify/ReadDirectoryChangesW) with debounced auto-sync — the graph stays current as you code, zero config |
-| **20+ Languages** | TypeScript, JavaScript, Python, Go, Rust, Java, C#, PHP, Ruby, C, C++, Objective-C, Swift, Kotlin, Scala, Dart, Lua, Luau, R, Svelte, Vue, Astro, Liquid, Pascal/Delphi |
+| **21+ Languages** | TypeScript, JavaScript, Python, Go, Rust, Java, Groovy, C#, PHP, Ruby, C, C++, Objective-C, Swift, Kotlin, Scala, Dart, Lua, Luau, R, Svelte, Vue, Astro, Liquid, Pascal/Delphi |
 | **Framework-aware Routes** | Recognizes web-framework routing files and links URL patterns to their handlers across 17 frameworks |
 | **Mixed iOS / React Native / Expo** | Closes cross-language flows that static parsing misses: Swift ↔ ObjC bridging, React Native legacy bridge + TurboModules + Fabric view components, native → JS event emitters, Expo Modules |
 | **100% Local** | No data leaves your machine. No API keys. No external services. SQLite database only |
@@ -286,6 +286,7 @@ CodeGraph detects web-framework routing files and emits `route` nodes linked by 
 | **Laravel** | `Route::get()`, `Route::resource()`, `Controller@action`, tuple syntax |
 | **Drupal** | `*.routing.yml` routes (`_controller`, `_form`, entity handlers); `hook_*` implementations in `.module`/`.theme`/`.install`/`.inc` |
 | **Rails** | `get '/x', to: 'users#index'`, hash-rocket `=>` syntax |
+| **Grails** | `UrlMappings.groovy` inline and block routes → `controller#action` handlers; Spring `@GetMapping` on Groovy controllers |
 | **Spring** | `@GetMapping`, `@PostMapping`, `@RequestMapping` on methods |
 | **Play** | `GET`/`POST`/… verb routes in `conf/routes` → `Controller.method` actions (Scala + Java) |
 | **Gin / chi / gorilla / mux** | `r.GET(...)`, `router.HandleFunc(...)` |
@@ -661,6 +662,7 @@ is written):
 | Go | `.go` | Full support |
 | Rust | `.rs` | Full support |
 | Java | `.java` | Full support |
+| Groovy | `.groovy`, `.gvy`, `.gy`, `.gsh` | Full support (classes, traits, interfaces, enums, methods, imports, call edges; Grails URL mappings and Spring annotations on Groovy controllers) |
 | C# | `.cs` | Full support |
 | PHP | `.php` | Full support |
 | Ruby | `.rb` | Full support |

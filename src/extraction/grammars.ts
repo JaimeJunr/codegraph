@@ -25,6 +25,7 @@ const WASM_GRAMMAR_FILES: Record<GrammarLanguage, string> = {
   go: 'tree-sitter-go.wasm',
   rust: 'tree-sitter-rust.wasm',
   java: 'tree-sitter-java.wasm',
+  groovy: 'tree-sitter-groovy.wasm',
   c: 'tree-sitter-c.wasm',
   cpp: 'tree-sitter-cpp.wasm',
   csharp: 'tree-sitter-c_sharp.wasm',
@@ -62,6 +63,10 @@ export const EXTENSION_MAP: Record<string, Language> = {
   '.go': 'go',
   '.rs': 'rust',
   '.java': 'java',
+  '.groovy': 'groovy',
+  '.gvy': 'groovy',
+  '.gy': 'groovy',
+  '.gsh': 'groovy',
   '.c': 'c',
   '.h': 'c', // Could also be C++, defaulting to C
   '.cpp': 'cpp',
@@ -216,7 +221,7 @@ export async function loadGrammarsForLanguages(languages: Language[]): Promise<v
       // `class Foo(...)` as an ERROR that swallows the whole class (#237); we
       // vendor the upstream ABI-15 tree-sitter-c-sharp 0.23.5 wasm, which parses
       // primary constructors natively.
-      const wasmPath = (lang === 'pascal' || lang === 'scala' || lang === 'lua' || lang === 'luau' || lang === 'csharp' || lang === 'r')
+      const wasmPath = (lang === 'pascal' || lang === 'scala' || lang === 'lua' || lang === 'luau' || lang === 'csharp' || lang === 'r' || lang === 'groovy')
         ? path.join(__dirname, 'wasm', wasmFile)
         : require.resolve(`tree-sitter-wasms/out/${wasmFile}`);
       const language = await WasmLanguage.load(wasmPath);
@@ -405,6 +410,7 @@ export function getLanguageDisplayName(language: Language): string {
     rust: 'Rust',
     r: 'R',
     java: 'Java',
+    groovy: 'Groovy',
     c: 'C',
     cpp: 'C++',
     csharp: 'C#',

@@ -10,7 +10,7 @@ import { stripCommentsForRegex } from '../strip-comments';
 
 export const springResolver: FrameworkResolver = {
   name: 'spring',
-  languages: ['java', 'kotlin', 'yaml', 'properties'],
+  languages: ['java', 'kotlin', 'groovy', 'yaml', 'properties'],
 
   claimsReference(name: string): boolean {
     // `@ConfigurationProperties(prefix="app.cache")` emits a reference whose
@@ -38,16 +38,19 @@ export const springResolver: FrameworkResolver = {
       return true;
     }
 
-    // Check for Spring annotations in Java files
+    // Check for Spring annotations in Java/Kotlin/Groovy files
     const allFiles = context.getAllFiles();
     for (const file of allFiles) {
-      if (file.endsWith('.java')) {
+      if (file.endsWith('.java') || file.endsWith('.kt') || file.endsWith('.groovy')) {
         const content = context.readFile(file);
         if (content && (
           content.includes('@SpringBootApplication') ||
           content.includes('@RestController') ||
+          content.includes('@Controller') ||
           content.includes('@Service') ||
-          content.includes('@Repository')
+          content.includes('@Repository') ||
+          content.includes('@Component') ||
+          content.includes('@GrailsPlugin')
         )) {
           return true;
         }
@@ -79,13 +82,13 @@ export const springResolver: FrameworkResolver = {
       );
       return { original: ref, targetNodeId: best.id, confidence: 0.85, resolvedBy: 'framework' };
     }
-    if (ref.referenceName.includes('.') && ref.language !== 'java' && ref.language !== 'kotlin') {
+    if (ref.referenceName.includes('.') && ref.language !== 'java' && ref.language !== 'kotlin' && ref.language !== 'groovy') {
       // Spring config dotted key — only when the source language is Java/Kotlin
       // (the bindings come from `@Value`). Skip non-Spring refs that happen to
       // have dots in them.
     }
     if (
-      (ref.language === 'java' || ref.language === 'kotlin') &&
+      (ref.language === 'java' || ref.language === 'kotlin' || ref.language === 'groovy') &&
       ref.referenceName.includes('.') &&
       !ref.referenceName.includes('::') &&
       // Exclude method-call style (single-dot, both sides lower-camel). Spring
@@ -197,12 +200,15 @@ export const springResolver: FrameworkResolver = {
     // Spring Boot is used from both Java and Kotlin (identical @GetMapping etc.
     // annotations); the difference is method syntax — Kotlin `fun name(...)` vs
     // Java `public X name(...)` — handled in the method regex below.
-    if (!filePath.endsWith('.java') && !filePath.endsWith('.kt')) return { nodes: [], references: [] };
+    if (!filePath.endsWith('.java') && !filePath.endsWith('.kt') && !filePath.endsWith('.groovy')) {
+      return { nodes: [], references: [] };
+    }
     const nodes: Node[] = [];
     const references: UnresolvedRef[] = [];
     const now = Date.now();
-    const lang: 'java' | 'kotlin' = filePath.endsWith('.kt') ? 'kotlin' : 'java';
-    const safe = stripCommentsForRegex(content, 'java');
+    const lang: 'java' | 'kotlin' | 'groovy' =
+      filePath.endsWith('.kt') ? 'kotlin' : filePath.endsWith('.groovy') ? 'groovy' : 'java';
+    const safe = stripCommentsForRegex(content, lang === 'groovy' ? 'groovy' : 'java');
 
     // Class-level @RequestMapping prefix (an @RequestMapping whose tail leads to a
     // `class`). Joined onto each method's path — and, crucially, NOT treated as a
@@ -241,11 +247,11 @@ export const springResolver: FrameworkResolver = {
       // Method it decorates: first declared method after (skip stacked annotations;
       // Java puts the return type before the name). Bounded so we don't grab a far one.
       const tail = safe.slice(match.index + match[0].length, match.index + match[0].length + 600);
-      const methodMatch = tail.match(/\bfun\s+(\w+)\s*\(|\b(?:public|private|protected)\s+[^;{=]*?\s+(\w+)\s*\(/);
+      const methodMatch = tail.match(/\bfun\s+(\w+)\s*\(|\bdef\s+(\w+)\s*\(|\b(?:public|private|protected)\s+[^;{=]*?\s+(\w+)\s*\(/);
       if (methodMatch) {
         references.push({
           fromNodeId: routeNode.id,
-          referenceName: (methodMatch[1] ?? methodMatch[2])!,
+          referenceName: (methodMatch[1] ?? methodMatch[2] ?? methodMatch[3])!,
           referenceKind: 'references',
           line,
           column: 0,
@@ -263,7 +269,7 @@ export const springResolver: FrameworkResolver = {
       const args = (match[1] || '').replace(/^\(|\)$/g, '');
       const after = safe.slice(match.index + match[0].length, match.index + match[0].length + 600);
       if (/^\s*(?:@[\w.]+(?:\([^)]*\))?\s*)*(?:public\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+)*class\b/.test(after)) continue; // class-level prefix
-      const methodMatch = after.match(/\bfun\s+(\w+)\s*\(|\b(?:public|private|protected)\s+[^;{=]*?\s+(\w+)\s*\(/);
+      const methodMatch = after.match(/\bfun\s+(\w+)\s*\(|\bdef\s+(\w+)\s*\(|\b(?:public|private|protected)\s+[^;{=]*?\s+(\w+)\s*\(/);
       if (!methodMatch) continue;
       const verbM = args.match(/method\s*=\s*(?:RequestMethod\.)?(\w+)/);
       const method = verbM ? verbM[1]!.toUpperCase() : 'ANY';
@@ -279,7 +285,7 @@ export const springResolver: FrameworkResolver = {
       nodes.push(routeNode);
       references.push({
         fromNodeId: routeNode.id,
-        referenceName: (methodMatch[1] ?? methodMatch[2])!,
+        referenceName: (methodMatch[1] ?? methodMatch[2] ?? methodMatch[3])!,
         referenceKind: 'references',
         line, column: 0, filePath, language: lang,
       });
@@ -416,7 +422,7 @@ function extractSpringConfig(
 function extractSpringValueBindings(
   filePath: string,
   safe: string,
-  lang: 'java' | 'kotlin',
+  lang: 'java' | 'kotlin' | 'groovy',
   now: number,
   nodes: Node[],
   references: UnresolvedRef[],

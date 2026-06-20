@@ -28,6 +28,13 @@ node --version   # should be the nvm version (e.g. v22.22.2), not /exec-daemon/n
 `npm ci` itself does not need FTS5, so the update script works under either node;
 only test/CLI/server runs require the nvm node.
 
+**Local dev (mise):** this repo ships a `mise.toml` pinning `node = "22.22.2"`
+(an official build *with* FTS5). With mise active, `node` in this directory
+resolves to it automatically — no manual PATH juggling. The default system node
+(e.g. 22.14) is built *without* FTS5, so without mise you'll hit the same
+`no such module: fts5` failures; run tests with `mise exec node@22.22.2 -- npm test`
+or `mise exec node@22.22.2 -- npx vitest run <file>`.
+
 ### Build / lint / test / run
 Standard scripts live in `package.json`. There is no separate lint/ESLint setup —
 `tsc` (run by `npm run build`) is the type/lint check.
