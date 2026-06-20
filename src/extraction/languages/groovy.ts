@@ -1,150 +1,176 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 import { getNodeText, getChildByField } from '../tree-sitter-helpers';
-import type { LanguageExtractor } from '../tree-sitter-types';
+import type { LanguageExtractor, ExtractorContext } from '../tree-sitter-types';
 
 /**
- * Groovy return types that can't be a chained-call receiver.
- * `def` is dynamic — no static receiver to chain on.
+ * Groovy extractor for the `murtaza64/tree-sitter-groovy` grammar (ABI 15).
+ *
+ * Node scheme (very different from the java-derived grammars):
+ *   - class / interface → `class_definition` (name field `name`, body field `body` = a `closure`;
+ *     the `class`/`interface` keyword is an ANONYMOUS child).
+ *   - method / function → `function_definition` (with body) and `function_declaration` (no body,
+ *     in interfaces). NAME lives in the `function` field — NOT `name`. Return type in `type`.
+ *   - field / local var → `declaration` (name field `name`, modifiers via `access_modifier`/`modifier`).
+ *   - import → `groovy_import` (qualified name in the `import` field); package → `groovy_package`.
+ *   - call → `function_call` and `juxt_function_call` (paren-less call, e.g. `render foo`).
+ *   - `enum` and `trait` are NOT keywords in this grammar — they parse as
+ *     `identifier identifier closure` siblings and are recovered in `visitNode`.
  */
-const GROOVY_NON_CLASS_RETURN_NODES = new Set([
-  'void_type',
-  'integral_type',
-  'floating_point_type',
-  'boolean_type',
-]);
 
-function extractGroovyReturnType(node: SyntaxNode, source: string): string | undefined {
-  const typeNode = getChildByField(node, 'type');
-  if (!typeNode) return undefined;
-  if (typeNode.type === 'type_identifier' && getNodeText(typeNode, source).trim() === 'def') {
-    return undefined;
+/** Concatenated text of a node's `access_modifier` / `modifier` children. */
+function readModifierText(node: SyntaxNode): string {
+  const parts: string[] = [];
+  for (let i = 0; i < node.childCount; i++) {
+    const c = node.child(i);
+    if (c && (c.type === 'access_modifier' || c.type === 'modifier')) parts.push(c.text);
   }
-  if (GROOVY_NON_CLASS_RETURN_NODES.has(typeNode.type)) return undefined;
-  if (typeNode.type === 'array_type') return undefined;
-  const raw = getNodeText(typeNode, source).trim().replace(/<[^>]*>/g, '');
-  const last = raw.split('.').pop()?.trim();
-  if (!last || !/^[A-Za-z_]\w*$/.test(last)) return undefined;
-  return last;
+  return parts.join(' ');
 }
 
-function readModifiers(node: SyntaxNode): string | undefined {
-  for (let i = 0; i < node.childCount; i++) {
-    const child = node.child(i);
-    if (child?.type === 'modifiers') return child.text;
-  }
-  return undefined;
+/** Create enum_member nodes from the (error-recovered) enum body closure. */
+function collectEnumMembers(closure: SyntaxNode, ctx: ExtractorContext): void {
+  const walk = (node: SyntaxNode) => {
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const child = node.namedChild(i);
+      if (!child) continue;
+      if (child.type === 'parameter') {
+        const nameNode = getChildByField(child, 'name') ?? child.namedChild(0);
+        if (nameNode) ctx.createNode('enum_member', getNodeText(nameNode, ctx.source), nameNode);
+      } else {
+        // Descend through ERROR / parameter_list wrappers the grammar emits.
+        walk(child);
+      }
+    }
+  };
+  walk(closure);
 }
 
 export const groovyExtractor: LanguageExtractor = {
-  functionTypes: [],
-  classTypes: ['class_declaration'],
-  methodTypes: ['method_declaration', 'constructor_declaration'],
-  interfaceTypes: ['interface_declaration'],
+  // function_definition is in BOTH function and method lists: the orchestrator
+  // picks `method` when inside a class-like scope, `function` otherwise.
+  functionTypes: ['function_definition', 'function_declaration'],
+  classTypes: ['class_definition'],
+  methodTypes: ['function_definition', 'function_declaration'],
+  interfaceTypes: [], // interfaces reuse class_definition → classifyClassNode
   structTypes: [],
-  enumTypes: ['enum_declaration'],
-  enumMemberTypes: ['enum_constant'],
+  enumTypes: [], // enum is not a grammar keyword → recovered in visitNode
   typeAliasTypes: [],
-  importTypes: ['import_declaration'],
-  callTypes: ['method_invocation'],
-  variableTypes: ['local_variable_declaration'],
-  fieldTypes: ['field_declaration'],
+  importTypes: ['groovy_import'],
+  callTypes: ['function_call', 'juxt_function_call'],
+  // `declaration` is in BOTH lists: field when its immediate parent is class-like,
+  // variable otherwise (the orchestrator gates on isInsideClassLikeNode).
+  variableTypes: ['declaration'],
+  fieldTypes: ['declaration'],
   nameField: 'name',
   bodyField: 'body',
   paramsField: 'parameters',
   returnField: 'type',
-  getReturnType: extractGroovyReturnType,
 
-  getSignature: (node, source) => {
-    const params = getChildByField(node, 'parameters');
-    const returnType = getChildByField(node, 'type');
-    if (!params) return undefined;
-    const paramsText = getNodeText(params, source);
-    return returnType ? getNodeText(returnType, source) + ' ' + paramsText : paramsText;
-  },
-
-  getVisibility: (node) => {
-    const text = readModifiers(node);
-    if (!text) return undefined;
-    if (text.includes('public')) return 'public';
-    if (text.includes('private')) return 'private';
-    if (text.includes('protected')) return 'protected';
+  // function_definition/declaration name lives in the `function` field, not `name`.
+  resolveName: (node, source) => {
+    if (node.type === 'function_definition' || node.type === 'function_declaration') {
+      const fn = getChildByField(node, 'function');
+      return fn ? getNodeText(fn, source) : undefined;
+    }
     return undefined;
   },
 
-  isStatic: (node) => {
-    const text = readModifiers(node);
-    return text ? /\bstatic\b/.test(text) : false;
+  classifyClassNode: (node) => {
+    for (let i = 0; i < node.childCount; i++) {
+      const c = node.child(i);
+      if (c && !c.isNamed && c.type === 'interface') return 'interface';
+    }
+    return 'class';
   },
 
+  getReturnType: (node, source) => {
+    const typeNode = getChildByField(node, 'type');
+    if (!typeNode) return undefined;
+    const raw = getNodeText(typeNode, source).trim().replace(/<[^>]*>/g, '');
+    const last = raw.split('.').pop()?.trim();
+    // Only class-like return types (PascalCase) — skips def/void/int/String-of-primitives.
+    if (!last || !/^[A-Z]\w*$/.test(last)) return undefined;
+    return last;
+  },
+
+  getSignature: (node, source) => {
+    const params = getChildByField(node, 'parameters');
+    const typeNode = getChildByField(node, 'type');
+    const paramsText = params ? getNodeText(params, source) : '()';
+    return typeNode ? `${getNodeText(typeNode, source)} ${paramsText}` : paramsText;
+  },
+
+  getVisibility: (node) => {
+    const text = readModifierText(node);
+    if (text.includes('private')) return 'private';
+    if (text.includes('protected')) return 'protected';
+    if (text.includes('public')) return 'public';
+    return undefined;
+  },
+
+  isStatic: (node) => /\bstatic\b/.test(readModifierText(node)),
   isConst: (node) => {
-    const text = readModifiers(node);
-    return text ? /\bstatic\b/.test(text) && /\bfinal\b/.test(text) : false;
+    const text = readModifierText(node);
+    return /\bstatic\b/.test(text) && /\bfinal\b/.test(text);
   },
 
   extractImport: (node, source) => {
-    const importText = source.substring(node.startIndex, node.endIndex).trim();
-    const scopedId = node.namedChildren.find((c: SyntaxNode) => c.type === 'scoped_identifier');
-    if (scopedId) {
-      const moduleName = source.substring(scopedId.startIndex, scopedId.endIndex);
-      return { moduleName, signature: importText };
+    const full = source.substring(node.startIndex, node.endIndex).trim();
+    const qn =
+      getChildByField(node, 'import') ??
+      node.namedChildren.find(
+        (c: SyntaxNode) => c.type === 'qualified_name' || c.type === 'identifier',
+      );
+    if (!qn) return null;
+    let moduleName = getNodeText(qn, source).trim();
+    if (node.namedChildren.some((c: SyntaxNode) => c.type === 'wildcard_import')) {
+      moduleName += '.*';
     }
-    const id = node.namedChildren.find((c: SyntaxNode) => c.type === 'identifier');
-    if (id) {
-      const moduleName = source.substring(id.startIndex, id.endIndex);
-      return { moduleName, signature: importText };
-    }
-    return null;
+    return { moduleName, signature: full };
   },
 
-  packageTypes: ['package_declaration'],
+  packageTypes: ['groovy_package'],
   extractPackage: (node, source) => {
-    const id = node.namedChildren.find(
-      (c: SyntaxNode) => c.type === 'scoped_identifier' || c.type === 'identifier',
+    const qn = node.namedChildren.find(
+      (c: SyntaxNode) => c.type === 'qualified_name' || c.type === 'identifier',
     );
-    return id ? source.substring(id.startIndex, id.endIndex).trim() : null;
+    return qn ? getNodeText(qn, source).trim() : null;
   },
 
   visitNode: (node, ctx) => {
-    // `trait Foo { ... }` parses as `trait Foo` (juxt_function_call) + closure body.
-    // The grammar has no native trait_declaration node.
-    if (node.type === 'juxt_function_call') {
-      const nameNode = node.childForFieldName('name');
-      if (!nameNode || getNodeText(nameNode, ctx.source) !== 'trait') return false;
+    // `trait Foo { ... }` / `enum Bar { ... }` have no grammar keyword — both parse
+    // as `identifier(kw) identifier(name) closure` siblings. Detect on the CLOSURE
+    // (the body) so we handle every member in one pass and return true, which stops
+    // the orchestrator from re-visiting the closure's children as top-level symbols.
+    if (node.type === 'closure') {
+      const nameSib = node.previousNamedSibling;
+      const kwSib = nameSib?.previousNamedSibling;
+      if (nameSib?.type === 'identifier' && kwSib?.type === 'identifier') {
+        const kw = getNodeText(kwSib, ctx.source);
+        const name = getNodeText(nameSib, ctx.source);
 
-      const args = node.childForFieldName('args');
-      const traitNameNode = args?.namedChild(0);
-      if (!traitNameNode || traitNameNode.type !== 'identifier') return false;
-      const name = getNodeText(traitNameNode, ctx.source);
-      if (!name) return false;
-
-      const traitNode = ctx.createNode('trait', name, node);
-      if (!traitNode) return false;
-
-      ctx.pushScope(traitNode.id);
-
-      // Body is typically the next sibling closure on the program.
-      const parent = node.parent;
-      if (parent) {
-        const idx = parent.children.indexOf(node);
-        const next = idx >= 0 ? parent.child(idx + 1) : null;
-        const closure =
-          next?.type === 'expression_statement'
-            ? next.namedChildren.find((c: SyntaxNode) => c.type === 'closure')
-            : next?.type === 'closure'
-              ? next
-              : null;
-        if (closure) {
-          for (let i = 0; i < closure.namedChildCount; i++) {
-            const child = closure.namedChild(i);
+        if (kw === 'trait') {
+          const traitNode = ctx.createNode('trait', name, kwSib);
+          if (!traitNode) return false;
+          ctx.pushScope(traitNode.id);
+          for (let i = 0; i < node.namedChildCount; i++) {
+            const child = node.namedChild(i);
             if (child) ctx.visitNode(child);
           }
+          ctx.popScope();
+          return true;
+        }
+
+        if (kw === 'enum') {
+          const enumNode = ctx.createNode('enum', name, kwSib);
+          if (!enumNode) return false;
+          ctx.pushScope(enumNode.id);
+          collectEnumMembers(node, ctx);
+          ctx.popScope();
+          return true;
         }
       }
-
-      ctx.popScope();
-      return true;
     }
-
     return false;
   },
 };

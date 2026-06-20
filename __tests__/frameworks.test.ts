@@ -852,6 +852,56 @@ describe('grailsResolver', () => {
     expect(nodes[0].name).toBe('GET /books');
     expect(references[0].referenceName).toBe('book#index');
   });
+
+  it('extracts mappings with a trailing method attribute', () => {
+    const src = `"/client/find"(controller: 'clientController', action: 'find', method: 'POST')\n`;
+    const { nodes, references } = grailsResolver.extract!('grails-app/conf/UrlMappings.groovy', src);
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0].name).toBe('POST /client/find');
+    expect(references[0].referenceName).toBe('clientController#find');
+  });
+
+  it('extracts mappings with action before controller', () => {
+    const src = `"/"(action: "index", controller: "home")\n`;
+    const { nodes, references } = grailsResolver.extract!('grails-app/conf/UrlMappings.groovy', src);
+    expect(nodes).toHaveLength(1);
+    expect(references[0].referenceName).toBe('home#index');
+  });
+
+  it('extracts every mapping in a realistic UrlMappings block', () => {
+    const src = `class UrlMappings {
+  static mappings = {
+    "/\$controller/\$action?/\$id?"{ }
+    "/client/find"(controller: 'client', action: 'find', method: 'GET')
+    "/clientReport/process"(controller: 'clientReport', action: 'process', method: 'POST')
+    "/"(controller: 'home', action: 'index')
+    "/onboarding/pep/\$id"(controller: 'onboarding', action: 'updatePEPAjax', method: 'PUT')
+  }
+}`;
+    const { nodes } = grailsResolver.extract!('grails-app/conf/UrlMappings.groovy', src);
+    expect(nodes).toHaveLength(4);
+  });
+
+  it('resolves a controller name that already ends in Controller without doubling the suffix', () => {
+    const ctrlNode = {
+      id: 'n1', kind: 'class', name: 'ClientController',
+      filePath: 'grails-app/controllers/ClientController.groovy',
+    };
+    const actionNode = {
+      id: 'n2', kind: 'method', name: 'find',
+      filePath: 'grails-app/controllers/ClientController.groovy',
+    };
+    const context = {
+      getNodesByName: (n: string) => (n === 'ClientController' ? [ctrlNode] : []),
+      getNodesInFile: () => [ctrlNode, actionNode],
+      fileExists: () => false,
+    };
+    const resolved = grailsResolver.resolve!(
+      { referenceName: 'clientController#find' } as any,
+      context as any,
+    );
+    expect(resolved?.targetNodeId).toBe('n2');
+  });
 });
 
 import { springResolver } from '../src/resolution/frameworks/java';

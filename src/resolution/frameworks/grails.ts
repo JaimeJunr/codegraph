@@ -93,23 +93,24 @@ export const grailsResolver: FrameworkResolver = {
     const now = Date.now();
     const safe = stripCommentsForRegex(content, 'groovy');
 
-    // "/path"(controller: "book", action: "index")
-    const inlineRoute =
-      /"([^"]+)"\s*\(\s*controller\s*:\s*["'](\w+)["']\s*,\s*action\s*:\s*["'](\w+)["']\s*\)/g;
-    let match: RegExpExecArray | null;
-    while ((match = inlineRoute.exec(safe)) !== null) {
-      const [, routePath, ctrl, action] = match;
-      const line = safe.slice(0, match.index).split('\n').length;
+    const pushRoute = (routePath: string, body: string, suffix: string, index: number, span: number) => {
+      // controller / action / method can appear in any order, with other
+      // attributes (e.g. `method: 'GET'`) interleaved — match each independently.
+      const ctrl = body.match(/(?:^|[(\s,{;])controller\s*[:=]\s*["'](\w+)["']/)?.[1];
+      const action = body.match(/(?:^|[(\s,{;])action\s*[:=]\s*["'](\w+)["']/)?.[1];
+      if (!ctrl || !action) return; // view-only / status mappings carry no controller#action
+      const method = body.match(/(?:^|[(\s,{;])method\s*[:=]\s*["'](\w+)["']/)?.[1]?.toUpperCase() ?? 'GET';
+      const line = safe.slice(0, index).split('\n').length;
       const routeNode: Node = {
-        id: `route:${filePath}:${line}:GET:${routePath}`,
+        id: `route:${filePath}:${line}:${method}:${routePath}${suffix}`,
         kind: 'route',
-        name: `GET ${routePath}`,
+        name: `${method} ${routePath}`,
         qualifiedName: `${filePath}::route:${ctrl}#${action}`,
         filePath,
         startLine: line,
         endLine: line,
         startColumn: 0,
-        endColumn: match[0].length,
+        endColumn: span,
         language: 'groovy',
         updatedAt: now,
       };
@@ -123,37 +124,19 @@ export const grailsResolver: FrameworkResolver = {
         filePath,
         language: 'groovy',
       });
+    };
+
+    // "/path"(controller: "book", action: "index", method: "GET") — attributes in any order.
+    const inlineRoute = /"([^"]+)"\s*\(([^)]*)\)/g;
+    let match: RegExpExecArray | null;
+    while ((match = inlineRoute.exec(safe)) !== null) {
+      pushRoute(match[1]!, match[2]!, '', match.index, match[0].length);
     }
 
     // "/path" { controller = "book"; action = "list" }
-    const blockRoute =
-      /"([^"]+)"\s*\{[^}]*?controller\s*=\s*["'](\w+)["'][^}]*?action\s*=\s*["'](\w+)["'][^}]*\}/gs;
+    const blockRoute = /"([^"]+)"\s*\{([^}]*)\}/gs;
     while ((match = blockRoute.exec(safe)) !== null) {
-      const [, routePath, ctrl, action] = match;
-      const line = safe.slice(0, match.index).split('\n').length;
-      const routeNode: Node = {
-        id: `route:${filePath}:${line}:GET:${routePath}:block`,
-        kind: 'route',
-        name: `GET ${routePath}`,
-        qualifiedName: `${filePath}::route:${ctrl}#${action}`,
-        filePath,
-        startLine: line,
-        endLine: line,
-        startColumn: 0,
-        endColumn: match[0].length,
-        language: 'groovy',
-        updatedAt: now,
-      };
-      nodes.push(routeNode);
-      references.push({
-        fromNodeId: routeNode.id,
-        referenceName: `${ctrl}#${action}`,
-        referenceKind: 'references',
-        line,
-        column: 0,
-        filePath,
-        language: 'groovy',
-      });
+      pushRoute(match[1]!, match[2]!, ':block', match.index, match[0].length);
     }
 
     return { nodes, references };
@@ -162,7 +145,9 @@ export const grailsResolver: FrameworkResolver = {
 
 function camelizeController(ctrl: string): string {
   const base = ctrl.includes('.') ? ctrl.split('.').pop()! : ctrl;
-  return base.charAt(0).toUpperCase() + base.slice(1) + 'Controller';
+  const pascal = base.charAt(0).toUpperCase() + base.slice(1);
+  // UrlMappings names may already carry the suffix (`controller: 'clientController'`).
+  return pascal.endsWith('Controller') ? pascal : pascal + 'Controller';
 }
 
 function resolveControllerAction(ctrlPath: string, action: string, context: ResolutionContext): string | null {
