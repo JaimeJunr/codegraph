@@ -107,10 +107,16 @@ export function validatePathWithinRoot(projectRoot: string, filePath: string): s
 
   // 2. Symlink-aware containment — resolve symlinks on both sides and re-check,
   //    so an in-repo symlink whose real target escapes the root is rejected.
+  //    Opt-out via CODEGRAPH_ALLOW_SYMLINK_ESCAPE=1 for trusted setups where the
+  //    root is a symlink farm pointing at out-of-tree checkouts (consolidated
+  //    multi-repo / worktree workspace). Reopens #527 — only enable when every
+  //    symlink target is your own trusted code. The lexical `../` guard above
+  //    still applies regardless.
   try {
     const realRoot = fs.realpathSync(normalizedRoot);
     const realResolved = fs.realpathSync(resolved);
-    return isWithinDir(realResolved, realRoot) ? realResolved : null;
+    if (isWithinDir(realResolved, realRoot)) return realResolved;
+    return process.env.CODEGRAPH_ALLOW_SYMLINK_ESCAPE ? realResolved : null;
   } catch (err) {
     // ENOENT: the path doesn't exist yet (a file about to be written, or an
     // index entry for a since-deleted file) — no symlink to follow, and the
