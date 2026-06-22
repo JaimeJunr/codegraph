@@ -250,6 +250,31 @@ describe('Symlink escape prevention (#527)', () => {
       cg.close();
     }
   });
+
+  // Opt-in escape hatch (CODEGRAPH_ALLOW_SYMLINK_ESCAPE) for trusted setups where
+  // the project root is a symlink farm pointing at out-of-tree checkouts — e.g. a
+  // consolidated multi-repo/worktree workspace. Relaxes ONLY the symlink-realpath
+  // layer; lexical `../` traversal stays blocked.
+  describe('with CODEGRAPH_ALLOW_SYMLINK_ESCAPE opt-in', () => {
+    afterEach(() => { delete process.env.CODEGRAPH_ALLOW_SYMLINK_ESCAPE; });
+
+    it('allows an in-repo symlink to an out-of-root FILE when opted in', () => {
+      if (!link(path.join(root, 'escape'), path.join(outside, 'pkg', 'secret.txt'))) return;
+      process.env.CODEGRAPH_ALLOW_SYMLINK_ESCAPE = '1';
+      expect(validatePathWithinRoot(root, 'escape')).not.toBeNull();
+    });
+
+    it('allows escape through an out-of-root DIR symlink when opted in', () => {
+      if (!link(path.join(root, 'escapedir'), path.join(outside, 'pkg'))) return;
+      process.env.CODEGRAPH_ALLOW_SYMLINK_ESCAPE = '1';
+      expect(validatePathWithinRoot(root, 'escapedir/secret.txt')).not.toBeNull();
+    });
+
+    it('still rejects lexical ../ traversal even when opted in', () => {
+      process.env.CODEGRAPH_ALLOW_SYMLINK_ESCAPE = '1';
+      expect(validatePathWithinRoot(root, `../${path.basename(outside)}/pkg/secret.txt`)).toBeNull();
+    });
+  });
 });
 
 describe('validateProjectPath — sensitive directory blocking', () => {
